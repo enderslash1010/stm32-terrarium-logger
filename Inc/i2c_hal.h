@@ -15,7 +15,7 @@ typedef enum {
 	I2C_ERROR
 } I2C_ERROR_CODE;
 
-void i2c_init(I2C_TypeDef* I2C);
+void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1);
 
 I2C_ERROR_CODE i2c_write(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len);
 uint8_t* i2c_read(I2C_TypeDef* I2C, uint8_t addr, uint8_t numBytes);

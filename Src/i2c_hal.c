@@ -125,7 +125,8 @@ uint8_t* i2c_read(I2C_TypeDef* I2C, uint8_t addr, uint8_t numBytes)
 	return data;
 }
 
-void i2c_init(I2C_TypeDef* I2C)
+// Initializes I2Cx with 100kHz speed
+void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1)
 {
 	RCC->APB2ENR |= RCC_APB2ENR_IOPBEN; // Enable GPIOB Clock
 	RCC->APB2ENR |= RCC_APB2ENR_AFIOEN; // Enable AFIO Clock
@@ -177,15 +178,22 @@ void i2c_init(I2C_TypeDef* I2C)
 
 	I2C->OAR1 |= (1 << 14); // I2C_OAR1 bit 14 "Should always be kept at 1 by software"
 
-	/* The I2C clock should be set to standard mode (100kHz), so the period of SCL should be 10us.
+	/*
+	 * Example CCR Calculation with PCLK1 = 36MHz
+	 *
+	 * The I2C clock should be set to standard mode (100kHz), so the period of SCL should be 10us.
 	 * T(SCL) = T(high) + T(low) -> 10us = 2*T(high), using a duty cycle of 1:1 (T(high)=T(low)) -> T(high) = 5us
-	 * The datasheet provides a formula for CCR: T(high) = CCR * T(PCLK1). We have PCLK1 = 36MHz, so T(PCLK1) = 0.0278us
-	 * Because we know T(high), we can solve for CCR: 5us = CCR * 0.0278us -> CCR = 180 (0xB4)
+	 * The datasheet provides a formula for CCR: T(high) = CCR * T(PCLK1). We have PCLK1 = 36MHz, so T(PCLK1) = 1/36MHz = 0.0278us
+	 * Because we know T(high), we can solve for CCR: 5us = CCR * 0.0278us -> CCR = 5us/0.0278us = 180 (0xB4)
 	 */
-	I2C->CR2 |= 0x24; // Program the peripheral input clock in I2C_CR2 register to 36 MHz in order to generate correct timings
-	I2C->CCR |= 0xB4; // Configure the clock control register
-	I2C->TRISE = 0x25; // Configure the rise time register; The datasheet gives formula (maximum SCL rise time)/(T(PCLK1)) + 1 -> 1000ns/27.78ns + 1 = 37
-	I2C->CR1 |= I2C_CR1_PE; // Program the I2C_CR1 register to enable the peripheral
+
+	uint8_t pclkInMHz = pclk1/1000000; // Stores pclk in MHz (36000000Hz -> 36MHz)
+	double Tpclk = 1.0/pclkInMHz; // Stores period of pclk in microseconds (us)
+
+	I2C->CR2 |= pclkInMHz; // Program the peripheral input clock in I2C_CR2 register to pclk MHz in order to generate correct timings
+	I2C->CCR |= ((uint16_t)(5/Tpclk)) & 0xFFF; // CCR = 5us/Tpclk(us), cast to uint16_t and masked to 12 LSB
+	I2C->TRISE = ((uint8_t)((1000.0/(Tpclk * 1000)) + 1)) & 0x3F; // Configure the rise time register; The datasheet gives formula (maximum SCL rise time)/(T(PCLK1)) + 1 -> 1000ns/T(PCLK1) + 1, since max rise time in standard mode is 1000ns
+	I2C->CR1 |= I2C_CR1_PE; // Enable the peripheral in CR1
 
 	if (I2C->SR2 & I2C_SR2_BUSY) i2c_stop(I2C);
 }
