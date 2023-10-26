@@ -1,13 +1,13 @@
 
 #include "sht30.h"
 
-SHT30_t sht30_init(I2C_TypeDef* I2C, uint8_t addr)
+SHT30_t sht30_init(I2C_TypeDef* I2C, uint32_t pclk1, uint8_t addr)
 {
 	SHT30_t sensor;
 	sensor.I2C = I2C;
 	sensor.addr = addr;
 
-	i2c_init(I2C); // Initialize I2C peripheral
+	i2c_init(I2C, pclk1); // Initialize I2C peripheral
 	// The initialization time for I2C is greater than 1ms, so no need to wait for the SHT30 to enter idle mode (Maximum 1ms after power on)
 
 	return sensor;

@@ -23,7 +23,7 @@ typedef struct SensorValues
 	double temperature;
 } SensorValues_t;
 
-SHT30_t sht30_init(I2C_TypeDef* I2C, uint8_t addr);
+SHT30_t sht30_init(I2C_TypeDef* I2C, uint32_t pclk1, uint8_t addr);
 
 SensorValues_t sht30_get_sensor_value(SHT30_t* sensor, uint8_t repeatability, uint8_t clockStretching, uint8_t isC);
 
