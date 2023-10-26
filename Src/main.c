@@ -27,7 +27,8 @@ void clock_init(void)
 	while (!(RCC->CFGR & RCC_CFGR_SWS_PLL)); // Wait for clock source to be set
 }
 
-/* Nokia Screen
+/*
+ * Nokia Screen
  * PA8: RST
  * PA4: NSS/CE
  * PA9: DC
@@ -37,7 +38,8 @@ void clock_init(void)
  * PA10: BL
  */
 
-/* SHT30
+/*
+ * SHT30 for sensor 1 (I2C1)
  * PB6: SCL
  * PB7: SDA
  */
@@ -50,7 +52,7 @@ int main(void)
 	PCD8544_t screen = pcd8544_init(GPIOA, RST_PIN, DC_PIN, BL_PIN, Vcc_PIN, 0x70, 0, 0b011); // Initialize screen
 	pcd8544_toggle_backlight(&screen); // Turn on screen backlight
 
-	SHT30_t sensor1 = sht30_init(I2C1, 0x44); // Initialize sensor 1 on I2C1
+	SHT30_t sensor1 = sht30_init(I2C1, 36000000, 0x44); // Initialize sensor 1 on I2C1
 
 	char temperatureStr[8], humidityStr[8]; // Initialize string buffers for temp and humidity, these are the strings sent to the screen
 	const char degreeSign[] = {0x80, 0x0}; // Initialize and define degree sign character (0x80 in default font, ending in null terminator)
