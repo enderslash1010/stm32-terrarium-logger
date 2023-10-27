@@ -65,6 +65,7 @@ int main(void)
 	char temperature2Str[8], humidity2Str[8]; // Initialize string buffers for temp and humidity from sensor 2
 
 	const char degreeSign[] = {0x80, 0x0}; // Initialize and define degree sign character (0x80 in default font, ending in null terminator)
+	const char plusMinusSign[] = {0x81, 0x0}; // Initialize and plus-minus sign character (0x81)
 
     while (1)
     {
@@ -94,7 +95,8 @@ int main(void)
     	pcd8544_set_cursor(&screen, 0, 1);
     	pcd8544_write_string(&screen, "Humidity:");
     	pcd8544_write_string(&screen, humidity1Str);
-    	pcd8544_write_string(&screen, "%");
+    	pcd8544_write_string(&screen, plusMinusSign);
+    	pcd8544_write_string(&screen, "2%");
 
     	pcd8544_set_cursor(&screen, 0, 3);
     	pcd8544_write_string(&screen, "Temp.:");
@@ -104,7 +106,8 @@ int main(void)
     	pcd8544_set_cursor(&screen, 0, 4);
     	pcd8544_write_string(&screen, "Humidity:");
     	pcd8544_write_string(&screen, humidity2Str);
-    	pcd8544_write_string(&screen, "%");
+    	pcd8544_write_string(&screen, plusMinusSign);
+    	pcd8544_write_string(&screen, "2%");
 
     	delay_ms(1000);
     }
