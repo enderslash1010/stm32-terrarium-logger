@@ -44,6 +44,12 @@ void clock_init(void)
  * PB7: SDA
  */
 
+/*
+ * SHT30 for sensor 2 (I2C2)
+ * PB10: SCL
+ * PB11: SDA
+ */
+
 int main(void)
 {
 	clock_init(); // Initialize clock to 72 MHz
@@ -53,31 +59,51 @@ int main(void)
 	pcd8544_toggle_backlight(&screen); // Turn on screen backlight
 
 	SHT30_t sensor1 = sht30_init(I2C1, 36000000, 0x44); // Initialize sensor 1 on I2C1
+	SHT30_t sensor2 = sht30_init(I2C2, 36000000, 0x44); // Initialize sensor 2 on I2C2
 
-	char temperatureStr[8], humidityStr[8]; // Initialize string buffers for temp and humidity, these are the strings sent to the screen
+	char temperature1Str[8], humidity1Str[8]; // Initialize string buffers for temp and humidity from sensor 1
+	char temperature2Str[8], humidity2Str[8]; // Initialize string buffers for temp and humidity from sensor 2
+
 	const char degreeSign[] = {0x80, 0x0}; // Initialize and define degree sign character (0x80 in default font, ending in null terminator)
 
     while (1)
     {
     	SensorValues_t sensor1Vals = sht30_get_sensor_value(&sensor1, 1, 1, 0); // Get temp and humidity values from sensor 1
+    	SensorValues_t sensor2Vals = sht30_get_sensor_value(&sensor2, 1, 1, 0); // Get temp and humidity values from sensor 2
 
-    	sprintf(temperatureStr, "%.1f", sensor1Vals.temperature); // Convert temperature from double to string
-    	sprintf(humidityStr, "%.0f", sensor1Vals.relative_humidity); // Convert humidiy from double to string
+    	sprintf(temperature1Str, "%.1f", sensor1Vals.temperature); // Convert temperature 1 from double to string
+    	sprintf(humidity1Str, "%.0f", sensor1Vals.relative_humidity); // Convert humidiy 1 from double to string
+
+    	sprintf(temperature2Str, "%.1f", sensor2Vals.temperature); // Convert temperature 2 from double to string
+    	sprintf(humidity2Str, "%.0f", sensor2Vals.relative_humidity); // Convert humidiy 2 from double to string
 
     	/*
     	 * Displays temp and humidity on the screen in form:
     	 *
     	 * Temp.:XX.X°F
     	 * Humidity:XX%
+    	 *
+    	 * Temp.:XX.X°F
+    	 * Humidity:XX%
     	 */
     	pcd8544_set_cursor(&screen, 0, 0);
     	pcd8544_write_string(&screen, "Temp.:");
-    	pcd8544_write_string(&screen, temperatureStr);
+    	pcd8544_write_string(&screen, temperature1Str);
     	pcd8544_write_string(&screen, degreeSign);
     	pcd8544_write_string(&screen, "F");
     	pcd8544_set_cursor(&screen, 0, 1);
     	pcd8544_write_string(&screen, "Humidity:");
-    	pcd8544_write_string(&screen, humidityStr);
+    	pcd8544_write_string(&screen, humidity1Str);
+    	pcd8544_write_string(&screen, "%");
+
+    	pcd8544_set_cursor(&screen, 0, 3);
+    	pcd8544_write_string(&screen, "Temp.:");
+    	pcd8544_write_string(&screen, temperature2Str);
+    	pcd8544_write_string(&screen, degreeSign);
+    	pcd8544_write_string(&screen, "F");
+    	pcd8544_set_cursor(&screen, 0, 4);
+    	pcd8544_write_string(&screen, "Humidity:");
+    	pcd8544_write_string(&screen, humidity2Str);
     	pcd8544_write_string(&screen, "%");
 
     	delay_ms(1000);
