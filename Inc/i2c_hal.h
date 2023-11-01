@@ -18,6 +18,9 @@ typedef enum {
 void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1);
 
 I2C_ERROR_CODE i2c_write(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len);
+void i2c_write_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len);
+
 uint8_t* i2c_read(I2C_TypeDef* I2C, uint8_t addr, uint8_t numBytes);
+uint8_t* i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t numBytes);
 
 #endif /* I2C_HAL_H_ */

@@ -59,13 +59,13 @@ static void start_measurement(SHT30_t* sensor, uint16_t command)
 {
 	// I2C write, with 16-bit measurement command
 	uint8_t commandPtr[] = {command >> 8, command & 0xFF};
-	i2c_write(sensor->I2C, sensor->addr, commandPtr, 2);
+	i2c_write_it(sensor->I2C, sensor->addr, commandPtr, 2);
 }
 
 static uint8_t* read_measurement(SHT30_t* sensor)
 {
 	// I2C read, with 16-bit temperature value, checksum, 16-bit humidity value, checksum
-	uint8_t* data = i2c_read(sensor->I2C, sensor->addr, 6);
+	uint8_t* data = i2c_read_it(sensor->I2C, sensor->addr, 6);
 	return data;
 }
 

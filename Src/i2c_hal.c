@@ -27,6 +27,19 @@ static I2C_ERROR_CODE i2c_start(I2C_TypeDef* I2C)
 	return I2C_OK;
 }
 
+// Master sends START condition, uses I2C with interrupts
+static void i2c_start_it(I2C_TypeDef* I2C)
+{
+	I2C->CR1 |= I2C_CR1_START; // Sends START condition
+}
+
+// Master sends STOP condition
+// Used by both blocking and interrupt modes
+static void i2c_stop(I2C_TypeDef* I2C)
+{
+	I2C->CR1 |= I2C_CR1_STOP; // Send STOP condition
+}
+
 // Master sends address of device it wants to communicate with
 // Master enters transmitter (LSB=0) or receiver mode (LSB=1)
 static I2C_ERROR_CODE i2c_send_addr(I2C_TypeDef* I2C, uint8_t addr, uint8_t LSB)
@@ -38,6 +51,21 @@ static I2C_ERROR_CODE i2c_send_addr(I2C_TypeDef* I2C, uint8_t addr, uint8_t LSB)
 	while (!(I2C->SR1 & I2C_SR1_ADDR)) if (timeout++ >= DELAY) return I2C_ADDR_ERROR; // Wait for addr to be sent by hardware
 	if (I2C->SR2); // Read SR2 to clear ADDR (only when ADDR is found to be set)
 	return I2C_OK;
+}
+
+// Data structures to store info for use with I2C interrupts; These structures should be set before calling i2c_start_it()
+volatile uint8_t currAddr[2] = {0, 0};
+volatile uint8_t currLSB[2] = {0, 0};
+volatile uint8_t* currData[2] = {0, 0};
+volatile uint16_t currLen[2] = {0, 0};
+
+// Master sends address of device it wants to communicate with; Only called in an interrupt request routine (IRQ)
+// Master enters transmitter (LSB=0) or receiver mode (LSB=1)
+static void i2c_send_addr_it(I2C_TypeDef* I2C)
+{
+	int i = I2C == I2C1 ? 0 : 1;
+	uint8_t msg = (currAddr[i] << 1) | (currLSB[i] & 0x1);
+	I2C->DR = msg; // Write msg to DR, sends addr on SDA
 }
 
 // Sends len bytes of data to previously called device
@@ -55,6 +83,24 @@ static I2C_ERROR_CODE i2c_send_data(I2C_TypeDef* I2C, uint8_t* data, uint16_t le
 	return I2C_OK;
 }
 
+// Sends data from previously set currData to previously called device; Only called in an interrupt request routine (IRQ)
+static void i2c_send_data_it(I2C_TypeDef* I2C)
+{
+	uint16_t len = I2C == I2C1 ? currLen[0] : currLen[1];
+	volatile uint8_t* data = I2C == I2C1 ? currData[0] : currData[1];
+
+	for (int i = 0; i < len; i++) // Send all len # of data bytes
+	{
+		while (!(I2C->SR1 & I2C_SR1_TXE)); // Wait for the transmission buffer (TX) to be empty
+		I2C->DR = data[i]; // Write data to DR, sends data on SDA
+	}
+
+	while (!(I2C->SR1 & I2C_SR1_TXE)); // Wait for the transmission buffer (TX) to be empty
+	i2c_stop(I2C);
+	if (I2C == I2C1) NVIC_DisableIRQ(I2C1_EV_IRQn);
+	else if (I2C == I2C2) NVIC_DisableIRQ(I2C2_EV_IRQn);
+}
+
 // Returns the byte in the receive buffer (Rx), and responds with ACK (ack=1) or NACK (ack=0)
 static uint8_t i2c_get_data(I2C_TypeDef* I2C, uint8_t ack)
 {
@@ -66,10 +112,26 @@ static uint8_t i2c_get_data(I2C_TypeDef* I2C, uint8_t ack)
 	return data;
 }
 
-// Master sends STOP condition
-static void i2c_stop(I2C_TypeDef* I2C)
+// Puts retrieved data from device into the currData structure to be returned from i2c_read_it() later
+static void i2c_get_data_it(I2C_TypeDef* I2C)
 {
-	I2C->CR1 |= I2C_CR1_STOP; // Send STOP condition
+	uint16_t len = I2C == I2C1 ? currLen[0] : currLen[1];
+	volatile uint8_t* data = I2C == I2C1 ? currData[0] : currData[1];
+
+	int i = 0;
+	for (; i < len - 1; i++)
+	{
+		while (!(I2C->SR1 & I2C_SR1_RXNE)); // Wait for receive buffer to be not empty
+		data[i] = I2C->DR; // Get byte from receive buffer (by reading from data register)
+	}
+
+	I2C->CR1 &= ~(I2C_CR1_ACK); // Sends NACK when reading from data register
+	while (!(I2C->SR1 & I2C_SR1_RXNE)); // Wait for receive buffer to be not empty
+	data[i] = I2C->DR; // Get byte from receive buffer (by reading from data register)
+
+	i2c_stop(I2C);
+	if (I2C == I2C1) NVIC_DisableIRQ(I2C1_EV_IRQn);
+	else if (I2C == I2C2) NVIC_DisableIRQ(I2C2_EV_IRQn);
 }
 
 // Sends a data byte through the I2C peripheral specified
@@ -111,7 +173,7 @@ uint8_t* i2c_read(I2C_TypeDef* I2C, uint8_t addr, uint8_t numBytes)
 		return 0;
 	}
 
-	uint8_t* data = (uint8_t*) malloc(numBytes * sizeof(uint8_t));
+	uint8_t* data = (uint8_t*) malloc(numBytes * sizeof(uint8_t)); // This data pointer is freed in sht30 library
 	int i = 0;
 	for (; i < numBytes - 1; i++) // Get data, and reply with ACK
 	{
@@ -125,6 +187,70 @@ uint8_t* i2c_read(I2C_TypeDef* I2C, uint8_t addr, uint8_t numBytes)
 	return data;
 }
 
+// Function called from I2Cx_EV_IRQHandler
+static void I2C_EV(I2C_TypeDef* I2C)
+{
+	if (I2C->SR1 & I2C_SR1_SB) // SB is set
+	{
+		i2c_send_addr_it(I2C);
+	}
+	else if (I2C->SR1 & I2C_SR1_ADDR) // ADDR is set
+	{
+		if (I2C->SR2); // Read SR2 to clear ADDR (only when ADDR is found to be set)
+
+		int i = I2C == I2C1 ? 0 : 1;
+		if (currLSB[i]) i2c_get_data_it(I2C); // Read
+		else i2c_send_data_it(I2C); // Write
+	}
+	// ADD10 not handled
+}
+
+// IRQ for I2Cx Events (SB, ADDR, ADD10, STOPF, BTF)
+void I2C1_EV_IRQHandler(void) { I2C_EV(I2C1); }
+void I2C2_EV_IRQHandler(void) { I2C_EV(I2C2); }
+
+// Does the same thing as i2c_write(), but uses interrupts instead of blocking
+void i2c_write_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len)
+{
+	while (I2C->SR2 & I2C_SR2_BUSY); // Wait for I2C bus to be not busy
+
+	if (I2C == I2C1) NVIC_EnableIRQ(I2C1_EV_IRQn);
+	else if (I2C == I2C2) NVIC_EnableIRQ(I2C2_EV_IRQn);
+
+	int i = I2C == I2C1 ? 0 : 1;
+	currLen[i] = len;
+	currData[i] = data;
+	currAddr[i] = addr;
+	currLSB[i] = 0;
+
+	i2c_start_it(I2C); // START condition kicks off all communication, interrupts handle the rest
+}
+
+// Does the same thing as i2c_read(), but uses interrupts instead of blocking
+uint8_t* i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t numBytes)
+{
+	while (I2C->SR2 & I2C_SR2_BUSY); // Wait for I2C bus to be not busy
+
+	int i = 0;
+	if (I2C == I2C1) NVIC_EnableIRQ(I2C1_EV_IRQn);
+	else if (I2C == I2C2) NVIC_EnableIRQ(I2C2_EV_IRQn);
+
+	// Write to i2c_get_data_it vars
+	uint8_t* data = (uint8_t*) malloc(numBytes * sizeof(uint8_t));
+	currData[i] = data;
+	currLen[i] = numBytes;
+
+	// Write to i2c_send_addr_it vars
+	currAddr[i] = addr;
+	currLSB[i] = 1;
+
+	I2C->CR1 |= I2C_CR1_ACK; // Enables sending of an ACK when reading from the data register (I2C->DR)
+
+	i2c_start_it(I2C);
+	while (I2C->SR2 & I2C_SR2_BUSY); // Wait for I2C bus to be not busy
+	return data;
+}
+
 // Initializes I2Cx with 100kHz speed
 void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1)
 {
@@ -135,6 +261,7 @@ void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1)
 	{
 		// Configure GPIO for I2C1
 		RCC->APB1ENR |= RCC_APB1ENR_I2C1EN; // Enable I2C1 Clock
+
 		// Uses default AFIO mapping for I2C1 (PB6->SCL, PB7->SDA), no need for remapping
 		I2C->CR1 &= ~(I2C_CR1_PE);
 		GPIOB->CRL |= (0b11 << 24) | (0b11 << 28); // Set PB6 and PB7 to output mode
@@ -177,6 +304,7 @@ void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1)
 	I2C->CR1 &= ~(I2C_CR1_SWRST);
 
 	I2C->OAR1 |= (1 << 14); // I2C_OAR1 bit 14 "Should always be kept at 1 by software"
+	I2C->CR2 |= I2C_CR2_ITEVTEN; // Enable interrupts for events
 
 	/*
 	 * Example CCR Calculation with PCLK1 = 36MHz
