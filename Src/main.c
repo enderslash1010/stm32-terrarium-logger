@@ -67,6 +67,25 @@ int main(void)
 	const char degreeSign[] = {0x80, 0x0}; // Initialize and define degree sign character (0x80 in default font, ending in null terminator)
 	const char plusMinusSign[] = {0x81, 0x0}; // Initialize and plus-minus sign character (0x81)
 
+	// Set up parts of the screen that don't change
+	pcd8544_set_cursor(&screen, 0, 0);
+	pcd8544_write_string(&screen, "Terrarium 1:");
+	pcd8544_set_cursor_string(&screen, 4, 1);
+	pcd8544_write_string(&screen, degreeSign);
+	pcd8544_write_string(&screen, "F ");
+	pcd8544_set_cursor_string(&screen, 9, 1);
+	pcd8544_write_string(&screen, plusMinusSign);
+	pcd8544_write_string(&screen, "2%");
+
+	pcd8544_set_cursor(&screen, 0, 3);
+	pcd8544_write_string(&screen, "Terrarium 2:");
+	pcd8544_set_cursor_string(&screen, 4, 4);
+	pcd8544_write_string(&screen, degreeSign);
+	pcd8544_write_string(&screen, "F ");
+	pcd8544_set_cursor_string(&screen, 9, 4);
+	pcd8544_write_string(&screen, plusMinusSign);
+	pcd8544_write_string(&screen, "2%");
+
     while (1)
     {
     	SensorValues_t sensor1Vals = sht30_get_sensor_value(&sensor1, 1, 1, 0); // Get temp and humidity values from sensor 1
@@ -81,33 +100,22 @@ int main(void)
     	/*
     	 * Displays temp and humidity on the screen in form:
     	 *
-    	 * Temp.:XX.X°F
-    	 * Humidity:XX%
+    	 * Terrarium 1:
+    	 * XX.X°F XX%
     	 *
-    	 * Temp.:XX.X°F
-    	 * Humidity:XX%
+    	 * Terrarium 2:
+    	 * XX.X°F XX%
     	 */
-    	pcd8544_set_cursor(&screen, 0, 0);
-    	pcd8544_write_string(&screen, "Temp.:");
-    	pcd8544_write_string(&screen, temperature1Str);
-    	pcd8544_write_string(&screen, degreeSign);
-    	pcd8544_write_string(&screen, "F");
-    	pcd8544_set_cursor(&screen, 0, 1);
-    	pcd8544_write_string(&screen, "Humidity:");
-    	pcd8544_write_string(&screen, humidity1Str);
-    	pcd8544_write_string(&screen, plusMinusSign);
-    	pcd8544_write_string(&screen, "2%");
 
-    	pcd8544_set_cursor(&screen, 0, 3);
-    	pcd8544_write_string(&screen, "Temp.:");
-    	pcd8544_write_string(&screen, temperature2Str);
-    	pcd8544_write_string(&screen, degreeSign);
-    	pcd8544_write_string(&screen, "F");
+    	pcd8544_set_cursor(&screen, 0, 1);
+    	pcd8544_write_string(&screen, temperature1Str);
+    	pcd8544_set_cursor_string(&screen, 7, 1);
+    	pcd8544_write_string(&screen, humidity1Str);
+
     	pcd8544_set_cursor(&screen, 0, 4);
-    	pcd8544_write_string(&screen, "Humidity:");
+    	pcd8544_write_string(&screen, temperature2Str);
+    	pcd8544_set_cursor_string(&screen, 7, 4);
     	pcd8544_write_string(&screen, humidity2Str);
-    	pcd8544_write_string(&screen, plusMinusSign);
-    	pcd8544_write_string(&screen, "2%");
 
     	delay_ms(1000);
     }

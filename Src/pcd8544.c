@@ -265,9 +265,18 @@ void pcd8544_write_string(PCD8544_t* screen, const char* str)
 
 }
 
+// Sets cursor position in pixels across (X) and banks (Y)
 void pcd8544_set_cursor(PCD8544_t* screen, uint8_t X, uint8_t Y)
 {
 	pcd8544_set_X_RAM(screen, X);
+	pcd8544_set_Y_RAM(screen, Y);
+}
+
+// Sets cursor position in the context of writing strings to the screen
+// Accounts for the width of characters in the default font
+void pcd8544_set_cursor_string(PCD8544_t* screen, uint8_t X, uint8_t Y)
+{
+	pcd8544_set_X_RAM(screen, X*6);
 	pcd8544_set_Y_RAM(screen, Y);
 }
 
