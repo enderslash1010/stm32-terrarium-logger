@@ -109,20 +109,6 @@ uint8_t DEFAULT_FONT[][5] = {
 		{0x44, 0x44, 0x5F, 0x44, 0x44} // Plus-minus symbol (0x81)
 };
 
-inline static void config_gpio(GPIO_TypeDef* GPIOx, uint8_t pin, uint8_t mode, uint8_t cnf)
-{
-	if (pin < 8) // CRL
-	{
-		GPIOx->CRL &= ~((0b11 << (pin * 4)) | (0b11 << ((pin * 4) + 2))); // Clear MODE(pin) and CNF(pin)
-		GPIOx->CRL |= (((mode & 0b11) << (pin * 4)) | ((cnf & 0b11) << ((pin * 4) + 2))); // Set MODE(pin) and CNF(pin)
-	}
-	else // CRH
-	{
-		GPIOx->CRH &= ~((0b11 << ((pin - 8) * 4)) | (0b11 << (((pin - 8) * 4) + 2))); // Clear MODE(pin) and CNF(pin)
-		GPIOx->CRH |= (((mode & 0b11) << ((pin - 8) * 4)) | ((cnf & 0b11) << (((pin - 8) * 4) + 2))); // Set MODE(pin) and CNF(pin)
-	}
-}
-
 PCD8544_t pcd8544_init(GPIO_TypeDef* GPIOx, uint8_t RST_Pin, uint8_t DC_Pin, uint8_t BL_Pin, uint8_t Vcc_Pin, uint8_t Vop, uint8_t TC, uint8_t BS)
 {
 	spi1_init(); // Initiate SPI
