@@ -14,7 +14,7 @@ SHT30_t sht30_init(I2C_TypeDef* I2C, uint32_t pclk1, uint8_t addr)
 }
 
 /*
- * Checksum Properties
+ * Checksum Properties (SHT3x-DIS pg. 14)
  * Name: CRC-8
  * Width: 8 bit
  * Polynomial: 0x31 (x^8 + x^5 + x^4 + 1)
@@ -25,14 +25,23 @@ SHT30_t sht30_init(I2C_TypeDef* I2C, uint32_t pclk1, uint8_t addr)
  *
  * Example: CRC (0xBEEF) = 0x92
  */
-
-/*
-static uint8_t compute_crc()
+static uint8_t compute_crc(const uint8_t* input, int len)
 {
-	// TODO
-	return 0;
+	const static uint8_t polynomial = 0x31;
+	uint8_t crc = 0xFF;
+
+	for (int i = 0; i < len; i++)
+	{
+		crc ^= input[i];
+		for (int j = 0; j < 8; j++)
+		{
+			if (crc & 0x80) crc = ((crc << 1) ^ polynomial);
+			else crc = (crc << 1);
+		}
+	}
+	return crc;
 }
-*/
+
 
 // Converts the raw relative humidity value from the sensor to relative humidity
 static double relative_humidity_conversion(uint16_t Srh)
@@ -59,13 +68,13 @@ static void start_measurement(SHT30_t* sensor, uint16_t command)
 {
 	// I2C write, with 16-bit measurement command
 	uint8_t commandPtr[] = {command >> 8, command & 0xFF};
-	i2c_write_it(sensor->I2C, sensor->addr, commandPtr, 2);
+	i2c_write(sensor->I2C, sensor->addr, commandPtr, 2);
 }
 
 static uint8_t* read_measurement(SHT30_t* sensor)
 {
 	// I2C read, with 16-bit temperature value, checksum, 16-bit humidity value, checksum
-	uint8_t* data = i2c_read_it(sensor->I2C, sensor->addr, 6);
+	uint8_t* data = i2c_read(sensor->I2C, sensor->addr, 6);
 	return data;
 }
 
@@ -95,15 +104,18 @@ SensorValues_t sht30_get_sensor_value(SHT30_t* sensor, uint8_t repeatability, ui
 		break;
 	}
 
-	start_measurement(sensor, command); // Send command to sensor to start measurement
-
 	uint8_t* data;
-	if (clockStretching) data = read_measurement(sensor); // If clock stretching is enabled, no need to wait for measurement to complete, as the sensor will pull SCL low until it's completed
-	else {
-		// Clock stretching disabled, need to wait a bit until read request is sent to avoid getting a NACK from the sensor
-		delay_ms(15); // 15ms delay for all repeatability types for simplicity
-		data = read_measurement(sensor);
+	do {
+		start_measurement(sensor, command); // Send command to sensor to start measurement
+
+		if (clockStretching) data = read_measurement(sensor); // If clock stretching is enabled, no need to wait for measurement to complete, as the sensor will pull SCL low until it's completed
+		else {
+			// Clock stretching disabled, need to wait a bit until read request is sent to avoid getting a NACK from the sensor
+			delay_ms(15); // 15ms delay for all repeatability types for simplicity
+			data = read_measurement(sensor);
+		}
 	}
+	while (compute_crc(data, 3) | compute_crc(data+3, 3)); // Verify received checksums are correct, get another measurement if checksum isn't correct
 
 	// Compose raw sensor values into 16-bit St and Srh variables
 	uint16_t St = (data[0] << 8) | (data[1]);
