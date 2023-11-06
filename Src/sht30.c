@@ -94,10 +94,10 @@ void sht30_get_raw_sensor(SHT30_t* sensor, uint8_t repeatability, uint8_t clockS
 	}
 
 	uint8_t commandPtr[2] = {command >> 8, command & 0xFF};
-	i2c_write_it(sensor->I2C, sensor->addr, commandPtr, 2);
+	i2c_write_dma(sensor->I2C, sensor->addr, commandPtr, 2);
 
 	if (!clockStretching) delay_ms(15);
-	i2c_read_it(sensor->I2C, sensor->addr, data, 6);
+	i2c_read_dma(sensor->I2C, sensor->addr, data, 6);
 }
 
 // isC: 0->Celsius, 1->Fahrenheit

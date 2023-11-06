@@ -25,6 +25,16 @@ inline static void i2c_disable_it(I2C_TypeDef* I2C)
 	I2C->CR2 &= ~(I2C_CR2_ITBUFEN | I2C_CR2_ITEVTEN | I2C_CR2_ITERREN); // Disable Interrupts
 }
 
+inline static void i2c_enable_it_dma(I2C_TypeDef* I2C)
+{
+	I2C->CR2 |= I2C_CR2_ITEVTEN | I2C_CR2_ITERREN; // Enable Interrupts for DMA
+}
+
+inline static void i2c_disable_it_dma(I2C_TypeDef* I2C)
+{
+	I2C->CR2 &= ~(I2C_CR2_ITEVTEN | I2C_CR2_ITERREN); // Disable Interrupts for DMA
+}
+
 // Master sends START condition
 // Assumes I2C is in slave mode, switches to master mode upon sending START
 static I2C_ERROR_CODE i2c_start(I2C_TypeDef* I2C)
@@ -108,7 +118,7 @@ I2C_ERROR_CODE i2c_write(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t 
 
 // Reads numBytes bytes from the device
 // Returns a numBytes length array with the data
-uint8_t* i2c_read(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t numBytes)
+uint8_t* i2c_read(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len)
 {
 	while (I2C->SR2 & I2C_SR2_BUSY); // Wait for I2C bus to be not busy
 	if (i2c_start(I2C) != I2C_OK) // Send START condition
@@ -123,7 +133,7 @@ uint8_t* i2c_read(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t numByte
 	}
 
 	int i = 0;
-	for (; i < numBytes - 1; i++) // Get data, and reply with ACK
+	for (; i < len - 1; i++) // Get data, and reply with ACK
 	{
 		data[i] = i2c_get_data(I2C, 1);
 	}
@@ -258,7 +268,7 @@ void i2c_write_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len)
 }
 
 // Does the same thing as i2c_read(), but uses interrupts instead of blocking
-void i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t numBytes)
+void i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len)
 {
 	int i = (I2C == I2C1) ? 0 : 1;
 
@@ -272,7 +282,7 @@ void i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t numBytes
 	currLSB[i] = 1;
 	currAddr[i] = addr;
 	currData[i] = data;
-	currLen[i] = numBytes;
+	currLen[i] = len;
 	currByte[i] = 0;
 
 	// Enable Event, Buffer, and Error Interrupts
@@ -282,11 +292,105 @@ void i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t numBytes
 	i2c_start_it(I2C);
 }
 
+// DMA Interrupt Routines
+
+void DMA_Transmit(DMA_Channel_TypeDef* DMA, I2C_TypeDef* I2C)
+{
+	DMA->CCR &= ~DMA_CCR_EN; // Disable DMA Channel
+	DMA1->IFCR = (I2C == I2C1) ? DMA_IFCR_CTCIF6 : DMA_IFCR_CTCIF4; // Clear DMA Transfer Complete Flag
+	// Wait until BTF = 1 (in interrupt), then send STOP condition
+}
+
+void DMA_Receive(DMA_Channel_TypeDef* DMA, I2C_TypeDef* I2C)
+{
+	DMA->CCR &= ~DMA_CCR_EN; // Disable DMA Channel
+	DMA1->IFCR = (I2C == I2C1) ? DMA_IFCR_CTCIF7 : DMA_IFCR_CTCIF5; // Clear DMA Transfer Complete Flag
+	i2c_stop(I2C); // Send STOP Condition
+}
+
+void DMA1_Channel6_IRQHandler(void) { DMA_Transmit(DMA1_Channel6, I2C1); } // I2C1 Transmit
+void DMA1_Channel4_IRQHandler(void) { DMA_Transmit(DMA1_Channel4, I2C2); } // I2C2 Transmit
+void DMA1_Channel7_IRQHandler(void) { DMA_Receive(DMA1_Channel7, I2C1); } // I2C1 Receive
+void DMA1_Channel5_IRQHandler(void) { DMA_Receive(DMA1_Channel5, I2C2); } // I2C2 Receive
+
+void i2c_write_dma(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len)
+{
+	int i = (I2C == I2C1) ? 0 : 1;
+
+	// Wait for the I2Cx bus to be not busy
+	while (I2C->SR2 & I2C_SR2_BUSY);
+
+	// Set data structures for transmitter
+	currLSB[i] = 0;
+	currAddr[i] = addr;
+	currData[i] = data;
+	currLen[i] = len;
+
+	// Configure and enable I2C DMA channel for transmission
+	DMA_Channel_TypeDef* DMA;
+	if (i == 0) DMA = DMA1_Channel6;
+	else DMA = DMA1_Channel4;
+
+	DMA->CPAR = (uint32_t) &I2C->DR; // Set the I2C_DR register address in the DMA_SxPAR register. The data will be moved to this address from the memory after each TxE event
+	DMA->CMAR = (uint32_t) data; // Set the memory address in the DMA_SxMA0R register (and in DMA_SxMA1R register in the case of a bouble buffer mode). The data will be loaded into I2C_DR from this memory after each TxE event
+	DMA->CNDTR = len; // Configure the total number of bytes to be transferred in the DMA_SxNDTR register. After each TxE event, this value will be decremented
+	// Configure the DMA stream priority using the PL[0:1] bits in the DMA_SxCR register
+	DMA->CCR |= DMA_CCR_DIR | DMA_CCR_TCIE | DMA_CCR_MINC; // Set the DIR bit in the DMA_SxCR register, configure interrupts after full transfer, and enable memory increment mode
+	DMA->CCR |= DMA_CCR_EN; // Activate the stream by setting the EN bit in the DMA_SxCR register
+
+	// Set DMAEN bit
+	I2C->CR2 |= I2C_CR2_DMAEN;
+
+	// Enable Event and Error Interrupts
+	i2c_enable_it_dma(I2C);
+
+	i2c_start_it(I2C); // Uses interrupts
+}
+
+void i2c_read_dma(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len)
+{
+	int i = (I2C == I2C1) ? 0 : 1;
+
+	// Wait for the I2Cx bus to be not busy
+	while (I2C->SR2 & I2C_SR2_BUSY);
+
+	// Set data structures for transmitter
+	currLSB[i] = 1;
+	currAddr[i] = addr;
+	currData[i] = data;
+	currLen[i] = len;
+
+	// Configure and enable I2C DMA channel for reception
+	DMA_Channel_TypeDef* DMA;
+	if (i == 0) DMA = DMA1_Channel7;
+	else DMA = DMA1_Channel5;
+
+	DMA->CPAR = (uint32_t) &I2C->DR; // Set the I2C_DR register address in DMA_SxPAR register. The data will be moved from this address to the memory after each RxNE event
+	DMA->CMAR = (uint32_t) data; // Set the memory address in the DMA_SxMA0R register (and in DMA_SxMA1R register in the case of a bouble buffer mode). The data will be loaded from the I2C_DR register to this memory area after each RxNE event
+    DMA->CNDTR = len; // Configure the total number of bytes to be transferred in the DMA_SxNDTR register. After each RxNE event, this value will be decremented
+	// Configure the stream priority using the PL[0:1] bits in the DMA_SxCR register, not needed right now since DMA is only used by I2C
+	DMA->CCR &= ~DMA_CCR_DIR; // Reset the DIR bit
+	DMA->CCR |= DMA_CCR_TCIE | DMA_CCR_MINC; // Configure interrupts in the DMA_SxCR register after full transfer, and enable memory increment mode
+	DMA->CCR |= DMA_CCR_EN; // Activate the stream by setting the EN bit in the DMA_SxCR register
+
+	I2C->CR1 |= I2C_CR1_ACK;
+
+	// Set DMAEN and LAST bit (to generate NACK on last byte)
+	I2C->CR2 |= I2C_CR2_LAST;
+	I2C->CR2 |= I2C_CR2_DMAEN;
+
+	// Enable Event and Error Interrupts
+	i2c_enable_it_dma(I2C);
+
+	i2c_start_it(I2C); // Uses interrupts
+}
+
 // Initializes I2Cx with 100kHz speed
 void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1)
 {
 	RCC->APB2ENR |= RCC_APB2ENR_IOPBEN; // Enable GPIOB Clock
 	RCC->APB2ENR |= RCC_APB2ENR_AFIOEN; // Enable AFIO Clock
+	RCC->AHBENR |= RCC_AHBENR_DMA1EN; // Enable DMA1 Clock
 
 	if (I2C == I2C1)
 	{
@@ -312,6 +416,8 @@ void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1)
 		// Enable I2C1 NVIC Interrupts
 		NVIC_EnableIRQ(I2C1_EV_IRQn);
 		NVIC_EnableIRQ(I2C1_ER_IRQn);
+		NVIC_EnableIRQ(DMA1_Channel5_IRQn);
+		NVIC_EnableIRQ(DMA1_Channel7_IRQn);
 	}
 	else // I2C2
 	{
@@ -337,6 +443,8 @@ void i2c_init(I2C_TypeDef* I2C, uint32_t pclk1)
 		// Enable I2C2 NVIC Interrupts
 		NVIC_EnableIRQ(I2C2_EV_IRQn);
 		NVIC_EnableIRQ(I2C2_ER_IRQn);
+		NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+		NVIC_EnableIRQ(DMA1_Channel6_IRQn);
 	}
 
 	// Reset I2C

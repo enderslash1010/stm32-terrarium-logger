@@ -175,8 +175,8 @@ int main(void)
 
 	uint8_t sensor1Data[6], sensor2Data[6];
 
-	char temperature1Str[8], humidity1Str[8]; // Initialize string buffers for temp and humidity from sensor 1
-	char temperature2Str[8], humidity2Str[8]; // Initialize string buffers for temp and humidity from sensor 2
+	char temperature1Str[5], humidity1Str[3]; // Initialize string buffers for temp and humidity from sensor 1
+	char temperature2Str[5], humidity2Str[3]; // Initialize string buffers for temp and humidity from sensor 2
 
 	// Set up parts of the screen that don't change upon startup
 	display_init();
