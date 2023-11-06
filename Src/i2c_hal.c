@@ -142,9 +142,6 @@ volatile uint8_t* currData[2] = {0, 0};
 volatile uint16_t currLen[2] = {0, 0};
 volatile uint16_t currByte[2] = {0, 0}; // For the interrupt routine to know which byte it's currently on
 
-// For knowning when to return from reading data, making sure all data is read into the provided buffer before returning control to the caller
-volatile uint8_t dataMutex[2] = {0, 0}; // 0->buffer ready, 1->buffer busy
-
 // Master sends START condition, uses I2C with interrupts
 inline static void i2c_start_it(I2C_TypeDef* I2C)
 {
@@ -173,7 +170,10 @@ inline static void i2c_get_data_it(I2C_TypeDef* I2C, int i)
 // Function called from I2Cx_EV_IRQHandler
 static void I2C_EV(I2C_TypeDef* I2C, int i)
 {
-	if (I2C->SR1 & I2C_SR1_ADDR) if (I2C->SR2); // Read SR2 to clear ADDR (making sure ADDR = 1 first)
+	if (I2C->SR1 & I2C_SR1_ADDR)
+	{
+		if (I2C->SR2); // Read SR2 to clear ADDR (making sure ADDR = 1 first)
+	}
 	else if (I2C->SR1 & I2C_SR1_SB) i2c_send_addr_it(I2C, i); // EV5: SB = 1
 	else if (I2C->SR1 & I2C_SR1_RXNE) // EV7: RxNE = 1
 	{
@@ -182,7 +182,6 @@ static void I2C_EV(I2C_TypeDef* I2C, int i)
 			i2c_get_data_it(I2C, i); // Read DataN
 			// I2C Receive Stops
 			i2c_disable_it(I2C); // Disable Interrupts
-			dataMutex[i] = 0; // Release mutex here, give control back to return data
 		}
 		else if (I2C->SR1 & I2C_SR1_BTF) // EV7_1?: Method 2, communication stretched (RxNE = 1 and BTF = 1) to clear ACK
 		{
@@ -228,7 +227,6 @@ void I2C2_EV_IRQHandler(void) { I2C_EV(I2C2, 1); }
 static void I2C_ER(I2C_TypeDef* I2C, int i)
 {
 	i2c_stop(I2C);
-	dataMutex[i] = 0; // Release mutex
 	I2C->SR1 = ~(I2C_SR1_BERR | I2C_SR1_ARLO | I2C_SR1_AF | I2C_SR1_OVR | I2C_SR1_PECERR | I2C_SR1_TIMEOUT | I2C_SR1_SMBALERT); // Clear Error Flags
 	i2c_disable_it(I2C);
 }
@@ -260,7 +258,7 @@ void i2c_write_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t len)
 }
 
 // Does the same thing as i2c_read(), but uses interrupts instead of blocking
-uint8_t* i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t numBytes)
+void i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t numBytes)
 {
 	int i = (I2C == I2C1) ? 0 : 1;
 
@@ -276,17 +274,12 @@ uint8_t* i2c_read_it(I2C_TypeDef* I2C, uint8_t addr, uint8_t* data, uint8_t numB
 	currData[i] = data;
 	currLen[i] = numBytes;
 	currByte[i] = 0;
-	dataMutex[i] = 1; // Give control of buffer to interrupts
 
 	// Enable Event, Buffer, and Error Interrupts
 	i2c_enable_it(I2C);
 
 	// Send START Condition
 	i2c_start_it(I2C);
-
-	// Wait for the I2Cx bus to be not busy and the data mutex to be surrendered, to make sure data is fully populated
-	while (dataMutex[i] == 1);
-	return data;
 }
 
 // Initializes I2Cx with 100kHz speed
