@@ -2,6 +2,7 @@
 #include "main.h"
 #include "pcd8544.h"
 #include "sht30.h"
+#include "i2c_hal.h"
 
 #define RST_PIN 8
 #define DC_PIN 9
@@ -172,6 +173,8 @@ int main(void)
 	// Initialize wake button
 	button_init();
 
+	uint8_t sensor1Data[6], sensor2Data[6];
+
 	char temperature1Str[8], humidity1Str[8]; // Initialize string buffers for temp and humidity from sensor 1
 	char temperature2Str[8], humidity2Str[8]; // Initialize string buffers for temp and humidity from sensor 2
 
@@ -185,8 +188,15 @@ int main(void)
     {
     	if (displayOn) // Update display if on
     	{
-        	SensorValues_t sensor1Vals = sht30_get_sensor_value(&sensor1, 1, 1, 0); // Get temp and humidity values from sensor 1
-        	SensorValues_t sensor2Vals = sht30_get_sensor_value(&sensor2, 1, 1, 0); // Get temp and humidity values from sensor 2
+        	sht30_get_raw_sensor(&sensor1, 1, 1, sensor1Data); // Get temp and humidity values from sensor 1
+        	sht30_get_raw_sensor(&sensor2, 1, 1, sensor2Data); // Get temp and humidity values from sensor 2
+
+        	// Wait for both I2C buses to be free
+        	while ((I2C1->SR2 & I2C_SR2_BUSY) || (I2C2->SR2 & I2C_SR2_BUSY));
+
+        	// Convert raw sensor data
+        	SensorValues_t sensor1Vals = sht30_convert_sensor(sensor1Data, 0);
+        	SensorValues_t sensor2Vals = sht30_convert_sensor(sensor2Data, 0);
 
         	sprintf(temperature1Str, "%.1f", sensor1Vals.temperature); // Convert temperature 1 from double to string
         	sprintf(humidity1Str, "%.0f", sensor1Vals.relative_humidity); // Convert humidiy 1 from double to string
@@ -203,7 +213,6 @@ int main(void)
         	 * Terrarium 2:
         	 * XX.X°F XX%
         	 */
-
         	pcd8544_set_cursor(&screen, 0, 1);
         	pcd8544_write_string(&screen, temperature1Str);
         	pcd8544_set_cursor_string(&screen, 7, 1);
