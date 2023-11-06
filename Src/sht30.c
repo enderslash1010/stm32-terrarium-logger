@@ -65,13 +65,16 @@ static double temperature_conversion(uint16_t St, uint8_t isC)
 }
 
 /*
+ * Starts I2C Request for getting raw sensor values (6 bytes), uses I2C in interrupt mode
+ * *Note*: In order to have I2C communications on both buses at the same time, wait for each bus to be free before accessing data buffer
+ *      -> i.e. call sht30_get_raw_sensor(), then wait for I2C bus for that sensor to be free, then call sht30_convert_sensor()
+ *
  * repeatability: 0->high, 1->medium, 2->low
  * clockStretching: 0->clock stretching disabled, 1->clock stretching enabled
- * isC: 0->Celsius, 1->Fahrenheit
  */
-SensorValues_t sht30_get_sensor_value(SHT30_t* sensor, uint8_t repeatability, uint8_t clockStretching, uint8_t isC)
+void sht30_get_raw_sensor(SHT30_t* sensor, uint8_t repeatability, uint8_t clockStretching, uint8_t data[6])
 {
-	SensorValues_t result;
+	//SensorValues_t result;
 
 	uint16_t command; // command to be 'written' to sensor to start a measurement
 	switch (repeatability)
@@ -90,24 +93,37 @@ SensorValues_t sht30_get_sensor_value(SHT30_t* sensor, uint8_t repeatability, ui
 		break;
 	}
 
-	uint8_t data[6];
-	do {
-		// Send command to sensor to start measurement
-		uint8_t commandPtr[2] = {command >> 8, command & 0xFF};
-		i2c_write_it(sensor->I2C, sensor->addr, commandPtr, 2);
+	uint8_t commandPtr[2] = {command >> 8, command & 0xFF};
+	i2c_write_it(sensor->I2C, sensor->addr, commandPtr, 2);
 
-		if (!clockStretching) delay_ms(15);
-		i2c_read_it(sensor->I2C, sensor->addr, data, 6);
+	if (!clockStretching) delay_ms(15);
+	i2c_read_it(sensor->I2C, sensor->addr, data, 6);
+}
+
+// isC: 0->Celsius, 1->Fahrenheit
+SensorValues_t sht30_convert_sensor(uint8_t data[6], uint8_t isC)
+{
+	SensorValues_t result;
+
+	if (compute_crc(data, 3)) // Checksum failed for temperature
+	{
+		result.temperature = NAN; // NaN
 	}
-	while (compute_crc(data, 3) | compute_crc(data+3, 3)); // Verify received checksums are correct, get another measurement if checksum isn't correct
+	else
+	{
+		uint16_t St = (data[0] << 8) | (data[1]);
+		result.temperature = temperature_conversion(St, isC);
+	}
 
-	// Compose raw sensor values into 16-bit St and Srh variables
-	uint16_t St = (data[0] << 8) | (data[1]);
-	uint16_t Srh = (data[3] << 8) | (data[4]);
-
-	// Convert raw sensor values to relative humidity and temperature
-	result.relative_humidity = relative_humidity_conversion(Srh);
-	result.temperature = temperature_conversion(St, isC);
+	if (compute_crc(data + 3, 3)) // Checksum failed for humidity
+	{
+		result.relative_humidity = NAN; // NaN
+	}
+	else
+	{
+		uint16_t Srh = (data[3] << 8) | (data[4]);
+		result.relative_humidity = relative_humidity_conversion(Srh);
+	}
 
 	return result;
 }
