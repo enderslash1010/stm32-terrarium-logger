@@ -64,20 +64,6 @@ static double temperature_conversion(uint16_t St, uint8_t isC)
 	return result;
 }
 
-static void start_measurement(SHT30_t* sensor, uint16_t command)
-{
-	// I2C write, with 16-bit measurement command
-	uint8_t commandPtr[] = {command >> 8, command & 0xFF};
-	i2c_write(sensor->I2C, sensor->addr, commandPtr, 2);
-}
-
-static uint8_t* read_measurement(SHT30_t* sensor)
-{
-	// I2C read, with 16-bit temperature value, checksum, 16-bit humidity value, checksum
-	uint8_t* data = i2c_read(sensor->I2C, sensor->addr, 6);
-	return data;
-}
-
 /*
  * repeatability: 0->high, 1->medium, 2->low
  * clockStretching: 0->clock stretching disabled, 1->clock stretching enabled
@@ -104,16 +90,14 @@ SensorValues_t sht30_get_sensor_value(SHT30_t* sensor, uint8_t repeatability, ui
 		break;
 	}
 
-	uint8_t* data;
+	uint8_t data[6];
 	do {
-		start_measurement(sensor, command); // Send command to sensor to start measurement
+		// Send command to sensor to start measurement
+		uint8_t commandPtr[2] = {command >> 8, command & 0xFF};
+		i2c_write_it(sensor->I2C, sensor->addr, commandPtr, 2);
 
-		if (clockStretching) data = read_measurement(sensor); // If clock stretching is enabled, no need to wait for measurement to complete, as the sensor will pull SCL low until it's completed
-		else {
-			// Clock stretching disabled, need to wait a bit until read request is sent to avoid getting a NACK from the sensor
-			delay_ms(15); // 15ms delay for all repeatability types for simplicity
-			data = read_measurement(sensor);
-		}
+		if (!clockStretching) delay_ms(15);
+		i2c_read_it(sensor->I2C, sensor->addr, data, 6);
 	}
 	while (compute_crc(data, 3) | compute_crc(data+3, 3)); // Verify received checksums are correct, get another measurement if checksum isn't correct
 
@@ -124,9 +108,6 @@ SensorValues_t sht30_get_sensor_value(SHT30_t* sensor, uint8_t repeatability, ui
 	// Convert raw sensor values to relative humidity and temperature
 	result.relative_humidity = relative_humidity_conversion(Srh);
 	result.temperature = temperature_conversion(St, isC);
-
-	// deallocate data
-	free(data);
 
 	return result;
 }
