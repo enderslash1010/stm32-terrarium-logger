@@ -160,7 +160,6 @@ PCD8544_t pcd8544_init(GPIO_TypeDef* GPIOx, uint8_t RST_Pin, uint8_t DC_Pin, uin
 	pcd8544_set_temperature_control(&screen, TC);
 	pcd8544_set_bias(&screen, BS);
 	pcd8544_function_set(&screen, 0, 0, 0);
-	pcd8544_set_display_control(&screen, 1, 0);
 
 	return screen;
 }
@@ -171,7 +170,7 @@ static void send_spi(PCD8544_t* screen, uint8_t data, uint8_t DC)
 	if (DC & 0x1) screen->GPIOx->ODR |= (1 << 9);
 	else screen->GPIOx->ODR &= ~(1 << 9);
 
-	spi_write(SPI1, data, screen->GPIOx);
+	spi_write_dma(SPI1, data, screen->GPIOx);
 }
 
 // H=0 or H=1

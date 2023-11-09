@@ -6,5 +6,6 @@
 
 void spi1_init(void);
 void spi_write(SPI_TypeDef* SPI, uint8_t data, GPIO_TypeDef* GPIOx);
+void spi_write_dma(SPI_TypeDef* SPI, uint8_t data, GPIO_TypeDef* GPIOx);
 
 #endif /* SPI_HAL_H_ */

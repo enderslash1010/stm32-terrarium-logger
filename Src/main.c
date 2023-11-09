@@ -31,31 +31,6 @@ void clock_init(void)
 	while (!(RCC->CFGR & RCC_CFGR_SWS_PLL)); // Wait for clock source to be set
 }
 
-// Set up parts of the screen that don't change
-void display_init(void)
-{
-	static const char degreeSign[] = {0x80, 0x0}; // Degree sign character (0x80 in default font, ending in null terminator)
-	static const char plusMinusSign[] = {0x81, 0x0}; // Plus-minus sign character (0x81)
-
-	pcd8544_set_cursor(&screen, 0, 0);
-	pcd8544_write_string(&screen, "Terrarium 1:");
-	pcd8544_set_cursor_string(&screen, 4, 1);
-	pcd8544_write_string(&screen, degreeSign);
-	pcd8544_write_string(&screen, "F ");
-	pcd8544_set_cursor_string(&screen, 9, 1);
-	pcd8544_write_string(&screen, plusMinusSign);
-	pcd8544_write_string(&screen, "2%");
-
-	pcd8544_set_cursor(&screen, 0, 3);
-	pcd8544_write_string(&screen, "Terrarium 2:");
-	pcd8544_set_cursor_string(&screen, 4, 4);
-	pcd8544_write_string(&screen, degreeSign);
-	pcd8544_write_string(&screen, "F ");
-	pcd8544_set_cursor_string(&screen, 9, 4);
-	pcd8544_write_string(&screen, plusMinusSign);
-	pcd8544_write_string(&screen, "2%");
-}
-
 // Initiates button on PB0
 void button_init(void)
 {
@@ -95,17 +70,52 @@ void timer2_init(void)
 	NVIC->ISER[0] = (1 << 28); // Enable Interrupts for TIM2 in NVIC; TIM2 uses interrupt 28, so the enable bit is in ISER[0] at bit 28
 }
 
+// Set up parts of the screen that don't change
+void display_init(void)
+{
+	static const char degreeSign[] = {0x80, 0x0}; // Degree sign character (0x80 in default font, ending in null terminator)
+	static const char plusMinusSign[] = {0x81, 0x0}; // Plus-minus sign character (0x81)
+
+	pcd8544_set_cursor(&screen, 0, 0);
+	pcd8544_write_string(&screen, "Terrarium 1:");
+	pcd8544_set_cursor_string(&screen, 4, 1);
+	pcd8544_write_string(&screen, degreeSign);
+	pcd8544_write_string(&screen, "F ");
+	pcd8544_set_cursor_string(&screen, 9, 1);
+	pcd8544_write_string(&screen, plusMinusSign);
+	pcd8544_write_string(&screen, "2%");
+
+	pcd8544_set_cursor(&screen, 0, 3);
+	pcd8544_write_string(&screen, "Terrarium 2:");
+	pcd8544_set_cursor_string(&screen, 4, 4);
+	pcd8544_write_string(&screen, degreeSign);
+	pcd8544_write_string(&screen, "F ");
+	pcd8544_set_cursor_string(&screen, 9, 4);
+	pcd8544_write_string(&screen, plusMinusSign);
+	pcd8544_write_string(&screen, "2%");
+}
+
+void display_wake(void)
+{
+	pcd8544_set_display_control(&screen, 1, 0); // Screen in normal mode
+	pcd8544_toggle_backlight(&screen); // Turn on backlight
+	display_init(); // Set up static parts of screen
+	displayOn = 1;
+}
+
+void display_sleep(void)
+{
+	pcd8544_set_display_control(&screen, 0, 0); // Set display blank
+	pcd8544_toggle_backlight(&screen); // Turn off backlight
+	displayOn = 0;
+}
+
 // EXTI0 Interrupt Handler, for wake button to turn on display
 void EXTI0_IRQHandler(void)
 {
 	if (displayOn == 0) // Wake display if it's off
 	{
-		pcd8544_set_display_control(&screen, 1, 0); // Screen in normal mode
-		pcd8544_toggle_backlight(&screen); // Turn on backlight
-		display_init();
-		displayOn = 1;
-
-		// Set timer for how long to leave screen on, when timer ends turn the display back off
+		display_wake(); // We can use SPI DMA interrupts in this interrupt because SPI DMA interrupts have a higher pre-emption priority
 		TIM2->CNT = 0; // Make sure count is at 0
 		TIM2->CR1 |= TIM_CR1_CEN; // Enable TIM2 counter
 	}
@@ -120,12 +130,7 @@ void EXTI0_IRQHandler(void)
 void TIM2_IRQHandler(void)
 {
 	TIM2->CR1 &= ~TIM_CR1_CEN; // Disable TIM2 counter
-
-	// Put display to sleep
-	pcd8544_set_display_control(&screen, 0, 0); // Set display blank
-	pcd8544_toggle_backlight(&screen); // Turn off backlight
-	displayOn = 0;
-
+	display_sleep(); // We can use SPI DMA interrupts in this interrupt because SPI DMA interrupts have a higher pre-emption priority
 	TIM2->SR = ~TIM_SR_UIF; // Clear Update Interrupt Flag by writing 0 (rc_w0)
 }
 
@@ -159,13 +164,17 @@ void TIM2_IRQHandler(void)
 
 int main(void)
 {
+	NVIC_SetPriorityGrouping(4); // Set NVIC priority grouping to 4, to allow nested interrupts (3 bits pre-emptive priority, 1 bit sub-priority)
+	NVIC_SetPriority(TIM2_IRQn, NVIC_EncodePriority(4, 1, 0)); // pre-emptive = 1, sub-priority = 0
+	NVIC_SetPriority(EXTI0_IRQn, NVIC_EncodePriority(4, 1, 1)); // pre-emptive = 1, sub-priority = 1
+	NVIC_SetPriority(DMA1_Channel3_IRQn, NVIC_EncodePriority(4, 0, 0)); // pre-emptive = 0, sub-priority = 0, to be able to be nested in TIM2 and EXTI0 ISRs
+
 	clock_init(); // Initialize clock to 72 MHz
 	delay_init(); // Initialize delay functions
 	timer2_init(); // Initialize timer 2
 
 	screen = pcd8544_init(GPIOA, RST_PIN, DC_PIN, BL_PIN, Vcc_PIN, 0x70, 0, 0b011); // Initialize screen
-	pcd8544_toggle_backlight(&screen); // Turn on screen backlight
-	displayOn = 1;
+	display_wake();
 
 	SHT30_t sensor1 = sht30_init(I2C1, 36000000, 0x44); // Initialize sensor 1 on I2C1
 	SHT30_t sensor2 = sht30_init(I2C2, 36000000, 0x44); // Initialize sensor 2 on I2C2
@@ -178,9 +187,6 @@ int main(void)
 	char temperature1Str[5], humidity1Str[3]; // Initialize string buffers for temp and humidity from sensor 1
 	char temperature2Str[5], humidity2Str[3]; // Initialize string buffers for temp and humidity from sensor 2
 
-	// Set up parts of the screen that don't change upon startup
-	display_init();
-
 	// Start TIM2 to turn off the display after 10 sec, since the display is already on upon start
 	TIM2->CR1 |= TIM_CR1_CEN;
 
@@ -188,7 +194,7 @@ int main(void)
     {
     	if (displayOn) // Update display if on
     	{
-        	sht30_get_raw_sensor(&sensor1, 1, 1, sensor1Data); // Get temp and humidity values from sensor 1
+    		sht30_get_raw_sensor(&sensor1, 1, 1, sensor1Data); // Get temp and humidity values from sensor 1
         	sht30_get_raw_sensor(&sensor2, 1, 1, sensor2Data); // Get temp and humidity values from sensor 2
 
         	// Wait for both I2C buses to be free
