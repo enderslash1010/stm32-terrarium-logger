@@ -115,11 +115,7 @@ void EXTI0_IRQHandler(void)
 {
 	if (displayOn == 0) // Wake display if it's off
 	{
-		// See discussion in TIM2_IRQHandler() for why display_sleep() is not called there, same applies for display_wake()
-		// The superloop checks whether TIM2 is enabled when displayOn = 0, which then calls display_wake()
-		// Unlike the TIM2 ISR, there is no noticeable lag time between pressing the button and display_wake()
-
-		// Set timer for how long to leave screen on, when timer ends turn the display back off
+		display_wake(); // We can use SPI DMA interrupts in this interrupt because SPI DMA interrupts have a higher pre-emption priority
 		TIM2->CNT = 0; // Make sure count is at 0
 		TIM2->CR1 |= TIM_CR1_CEN; // Enable TIM2 counter
 	}
@@ -134,15 +130,7 @@ void EXTI0_IRQHandler(void)
 void TIM2_IRQHandler(void)
 {
 	TIM2->CR1 &= ~TIM_CR1_CEN; // Disable TIM2 counter
-	// Not best to call display_sleep() from here because it sends SPI to screen, which uses interrupts
-	// Since we are currently in an interrupt, another interrupt cannot be triggered without enabling global interrupts, which is best to avoid if not needed
-	// Therefore, the superloop checks whether TIM2 is disabled when displayOn = 1, which then calls display_sleep()
-
-	// This has the side effect of having a lag time between the timer interrupt and display_sleep(), because the rest of the superloop needs to be executed before the display turns off
-	// This lag time can theoretically range from 0 to just over 1 second
-	// The delay_ms(1000) is where the program counter (pc) will be at most of the time, the 2nd biggest 'time waster' is temp/humidity sensors taking 15ms each loop (and SPI with the display is 546us)
-	// Since this interrupt has an equal chance of being tirggered from anywhere in the superloop, the expected value of this lag time is around 0.5 seconds
-	// For this context, the lag time is acceptable
+	display_sleep(); // We can use SPI DMA interrupts in this interrupt because SPI DMA interrupts have a higher pre-emption priority
 	TIM2->SR = ~TIM_SR_UIF; // Clear Update Interrupt Flag by writing 0 (rc_w0)
 }
 
@@ -176,6 +164,11 @@ void TIM2_IRQHandler(void)
 
 int main(void)
 {
+	NVIC_SetPriorityGrouping(4); // Set NVIC priority grouping to 4, to allow nested interrupts (3 bits pre-emptive priority, 1 bit sub-priority)
+	NVIC_SetPriority(TIM2_IRQn, NVIC_EncodePriority(4, 1, 0)); // pre-emptive = 1, sub-priority = 0
+	NVIC_SetPriority(EXTI0_IRQn, NVIC_EncodePriority(4, 1, 1)); // pre-emptive = 1, sub-priority = 1
+	NVIC_SetPriority(DMA1_Channel3_IRQn, NVIC_EncodePriority(4, 0, 0)); // pre-emptive = 0, sub-priority = 0, to be able to be nested in TIM2 and EXTI0 ISRs
+
 	clock_init(); // Initialize clock to 72 MHz
 	delay_init(); // Initialize delay functions
 	timer2_init(); // Initialize timer 2
@@ -194,20 +187,14 @@ int main(void)
 	char temperature1Str[5], humidity1Str[3]; // Initialize string buffers for temp and humidity from sensor 1
 	char temperature2Str[5], humidity2Str[3]; // Initialize string buffers for temp and humidity from sensor 2
 
-	// Start TIM2 to turn off the display after ~10 sec, since the display is already on upon start
+	// Start TIM2 to turn off the display after 10 sec, since the display is already on upon start
 	TIM2->CR1 |= TIM_CR1_CEN;
 
     while (1)
     {
     	if (displayOn) // Update display if on
     	{
-    		if (!(TIM2->CR1 & TIM_CR1_CEN)) // If timer 2 is off
-    		{
-    			display_sleep();
-    			continue; // continues execution back at while (1), skipping everything below
-    		}
-
-        	sht30_get_raw_sensor(&sensor1, 1, 1, sensor1Data); // Get temp and humidity values from sensor 1
+    		sht30_get_raw_sensor(&sensor1, 1, 1, sensor1Data); // Get temp and humidity values from sensor 1
         	sht30_get_raw_sensor(&sensor2, 1, 1, sensor2Data); // Get temp and humidity values from sensor 2
 
         	// Wait for both I2C buses to be free
@@ -243,10 +230,6 @@ int main(void)
         	pcd8544_write_string(&screen, humidity2Str);
 
         	delay_ms(1000);
-    	}
-    	else if (TIM2->CR1 & TIM_CR1_CEN) // If displayOn = 0 and timer 2 is on
-    	{
-    		display_wake();
     	}
     }
 }
